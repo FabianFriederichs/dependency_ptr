@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(dependency_ptr VERSION 0.0.1 LANGUAGES CXX)
+project(dependency_ptr VERSION 0.1.0 LANGUAGES CXX)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 include(header_only_library)
