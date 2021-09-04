@@ -5,6 +5,7 @@
 #include <atomic>
 #include <ostream>
 #include <utility>
+#include <cstddef>
 
 #include <iostream>
 #ifndef NDEBUG
@@ -13,7 +14,7 @@
 		(std::cerr << "Assertion failed: (" << #condition << ")" << std::endl <<\
 		"\tfile: " << __FILE__ << std::endl <<\
 		"\tline: " << __LINE__ << std::endl <<\
-		"\tmessage:" << message << std::endl, std::abort()) : 0)
+		"\tmessage:" << message << std::endl, std::abort()) : (void)0)
 #else
 #define DPTR_ASSERT(condition, message) 0
 #endif
@@ -37,7 +38,7 @@ namespace dptr
 		public:
 			using element_type = T;
 			using pointer = T*;
-			using difference_type = diff_t;
+			using difference_type = std::ptrdiff_t;
 
 			intrusive_ptr() noexcept;
 			intrusive_ptr(T* ptr, bool add_ref = true);
@@ -166,7 +167,7 @@ namespace dptr
 			static_assert(std::is_base_of_v<guarded_dependency_type<false>, std::remove_cv_t<T>> || std::is_base_of_v<guarded_dependency_type<true>, std::remove_cv_t<T>>, "[dptr::detail::dependency_pointer_impl]: dependency_ptr can only be used with pointees deriving guarded_dependency<bool>.");
 		public:
 			using intrusive_ptr<T>::intrusive_ptr;
-			operator typename intrusive_ptr<T>::pointer() const noexcept { return get(); }
+			operator typename intrusive_ptr<T>::pointer() const noexcept { return intrusive_ptr<T>::get(); }
 		};
 		#pragma endregion
 	}	

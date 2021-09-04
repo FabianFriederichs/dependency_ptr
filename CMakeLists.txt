@@ -16,8 +16,8 @@ dependency_ptr                                          # target name
 
 target_include_directories(dependency_ptr
     INTERFACE
-        $<INSTALL_INTERFACE:"include">    
-        $<BUILD_INTERFACE:"${CMAKE_CURRENT_SOURCE_DIR}/include">
+        $<INSTALL_INTERFACE:include>    
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
 # creates package files and does all the install stuff
