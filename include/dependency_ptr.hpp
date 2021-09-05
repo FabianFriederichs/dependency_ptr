@@ -19,16 +19,43 @@
 #define DPTR_ASSERT(condition, message) 0
 #endif
 
-#ifdef NDEBUG
-#define DEBUG_CHOICE(debug, release) release
-#else
-#define DEBUG_CHOICE(debug, release) debug
-#endif
-
 namespace dptr
 {
+	// --- bitmask describing forbidden oprations on the dependency while the reference counter is > 0
+	enum class dependency_op : std::uint8_t
+	{
+		destroy = std::uint8_t{1u} << std::uint8_t{0u},
+		move_from = std::uint8_t{1u} << std::uint8_t{1u},
+		copy_from = std::uint8_t{1u} << std::uint8_t{2u},		
+		move_assign = std::uint8_t{1u} << std::uint8_t{3u},
+		copy_assign = std::uint8_t{1u} << std::uint8_t{4u},
+		assign = (std::uint8_t{1u} << std::uint8_t{3u}) | (std::uint8_t{1u} << std::uint8_t{4u})
+	};
+	using dependency_op_flags = std::underlying_type_t<dependency_op>;
+	constexpr dependency_op_flags operator~(dependency_op op) noexcept;
+	constexpr dependency_op_flags operator|(dependency_op lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags operator|(dependency_op_flags lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags operator|(dependency_op lhs, dependency_op_flags rhs) noexcept;
+	constexpr dependency_op_flags operator&(dependency_op lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags operator&(dependency_op_flags lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags operator&(dependency_op lhs, dependency_op_flags rhs) noexcept;
+	constexpr dependency_op_flags operator^(dependency_op lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags operator^(dependency_op_flags lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags operator^(dependency_op lhs, dependency_op_flags rhs) noexcept;
+	constexpr dependency_op_flags& operator|=(dependency_op_flags& lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags& operator&=(dependency_op_flags& lhs, dependency_op rhs) noexcept;
+	constexpr dependency_op_flags& operator^=(dependency_op_flags& lhs, dependency_op rhs) noexcept;
+
 	namespace detail
 	{
+		#ifdef NDEBUG
+		template <typename debug_type, typename release_type>
+		using debug_type_choice_t = release_type;
+		#else
+		template <typename debug_type, typename release_type>
+		using debug_type_choice_t = debug_type;
+		#endif
+
 		#pragma region intrusive_ptr
 
 		// Mostly equivalent to boost::intrusive_ptr. Avoids a dependency on boost.
@@ -106,22 +133,31 @@ namespace dptr
 		#pragma endregion
 
 		#pragma region guarded_dependency
-		// TODO: add a set of rule parameters, specifying which operations are illegal on still-referenced dependencies, e.g. copy, move assignment, move from...
 		// --- empty dummy class for release. should enable empty base optimization
-		class guarded_dependency_nop {};
+		template <bool atomic = false, dptr::dependency_op_flags forbidden_ops = dependency_op::destroy | dependency_op::move_from | dependency_op::assign>
+		class guarded_dependency_nop
+		{
+			static constexpr bool is_dep_ref_counter_atomic = atomic;
+			static constexpr dptr::dependency_op_flags dep_forbidden_op_flags = forbidden_ops;
+		};
 
 		// --- implemented variant for debug
-		template <bool atomic = false>
+		template <bool atomic = false, dptr::dependency_op_flags forbidden_ops = dependency_op::destroy | dependency_op::move_from | dependency_op::assign>
 		class guarded_dependency_impl;
-		template<bool atomic>
-		void intrusive_ptr_add_ref(const guarded_dependency_impl<atomic>* dep) noexcept;
-		template<bool atomic>
-		void intrusive_ptr_release(const guarded_dependency_impl<atomic>* dep) noexcept;
-		template<>
-		class guarded_dependency_impl<true>
+		
+		template<bool atomic, dptr::dependency_op_flags forbidden_ops>
+		void intrusive_ptr_add_ref(const guarded_dependency_impl<atomic, forbidden_ops>* dep) noexcept;
+		template<bool atomic, dptr::dependency_op_flags forbidden_ops>
+		void intrusive_ptr_release(const guarded_dependency_impl<atomic, forbidden_ops>* dep) noexcept;
+		
+		template<dptr::dependency_op_flags forbidden_ops>
+		class guarded_dependency_impl<true, forbidden_ops>
 		{
 			friend void intrusive_ptr_add_ref<>(const guarded_dependency_impl*) noexcept;
 			friend void intrusive_ptr_release<>(const guarded_dependency_impl*) noexcept;
+		public:
+			static constexpr bool is_dep_ref_counter_atomic = true;
+			static constexpr dptr::dependency_op_flags dep_forbidden_op_flags = forbidden_ops;
 		protected:
 			guarded_dependency_impl() noexcept;
 			guarded_dependency_impl(const guarded_dependency_impl& other) noexcept;
@@ -136,11 +172,14 @@ namespace dptr
 			using counter_t = std::atomic<std::size_t>;
 			mutable counter_t m_counter;
 		};
-		template<>
-		class guarded_dependency_impl<false>
+		template<dptr::dependency_op_flags forbidden_ops>
+		class guarded_dependency_impl<false, forbidden_ops>
 		{
 			friend void intrusive_ptr_add_ref<>(const guarded_dependency_impl*) noexcept;
 			friend void intrusive_ptr_release<>(const guarded_dependency_impl*) noexcept;
+		public:
+			static constexpr bool is_dep_ref_counter_atomic = false;
+			static constexpr dptr::dependency_op_flags dep_forbidden_op_flags = forbidden_ops;
 		protected:
 			guarded_dependency_impl() noexcept;
 			guarded_dependency_impl(const guarded_dependency_impl& other) noexcept;
@@ -154,28 +193,36 @@ namespace dptr
 
 			using counter_t = std::size_t;
 			mutable counter_t m_counter;
-		};		
+		};
 
-		template<bool atomic>
-		using guarded_dependency_type = DEBUG_CHOICE(guarded_dependency_impl<atomic>, guarded_dependency_nop);
+		template <typename T, typename = void>
+		struct is_guarded_dependency : std::false_type {};
+		template <typename T>
+		struct is_guarded_dependency<
+			T,
+			std::void_t<
+				std::enable_if_t<std::is_same_v<std::remove_cv_t<decltype(T::is_dep_ref_counter_atomic)>, bool>>,
+				std::enable_if_t<std::is_same_v<std::remove_cv_t<decltype(T::dep_forbidden_op_flags)>, dptr::dependency_op_flags>>,
+				std::enable_if_t<std::is_base_of_v<guarded_dependency_impl<T::is_dep_ref_counter_atomic, T::dep_forbidden_op_flags>, std::remove_cv_t<T>>>
+			>
+		> : std::true_type {};		
 		#pragma endregion
 
-		#pragma region dependency_pointer_impl
+		#pragma region dependency_ptr_impl
 		template <typename T>
 		class dependency_pointer_impl : public intrusive_ptr<T>
 		{
-			static_assert(std::is_base_of_v<guarded_dependency_type<false>, std::remove_cv_t<T>> || std::is_base_of_v<guarded_dependency_type<true>, std::remove_cv_t<T>>, "[dptr::detail::dependency_pointer_impl]: dependency_ptr can only be used with pointees deriving guarded_dependency<bool>.");
+			static_assert(is_guarded_dependency<T>::value, "[dptr::detail::dependency_pointer_impl]: dependency_ptr can only be used with types deriving guarded_dependency.");
 		public:
 			using intrusive_ptr<T>::intrusive_ptr;
 			operator typename intrusive_ptr<T>::pointer() const noexcept { return intrusive_ptr<T>::get(); }
 		};
 		#pragma endregion
-	}	
-
+	}
 	template <typename T>
-	using dependency_ptr = DEBUG_CHOICE(detail::dependency_pointer_impl<T>, T*);
-	template <bool atomic>
-	using guarded_dependency = detail::guarded_dependency_type<atomic>;
+	using dependency_ptr = detail::debug_type_choice_t<detail::dependency_pointer_impl<T>, T*>;
+	template <bool atomic = false, dependency_op_flags forbidden_ops = dependency_op::destroy | dependency_op::move_from | dependency_op::assign>
+	using guarded_dependency = detail::debug_type_choice_t<detail::guarded_dependency_impl<atomic, forbidden_ops>, detail::guarded_dependency_nop<atomic, forbidden_ops>>;	
 }
 
 #pragma region implementation
@@ -264,13 +311,13 @@ inline void dptr::detail::intrusive_ptr<T>::reset(T* ptr, bool add_ref)
 template<typename T>
 inline T& dptr::detail::intrusive_ptr<T>::operator*() const noexcept
 {
-	DPTR_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator*]: nullptr access.");
+	GTS_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator*]: nullptr access.");
 	return *m_ptr;
 }
 template<typename T>
 inline T* dptr::detail::intrusive_ptr<T>::operator->() const noexcept
 {
-	DPTR_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator->]: nullptr access.");
+	GTS_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator->]: nullptr access.");
 	return m_ptr;
 }
 template<typename T>
@@ -360,103 +407,197 @@ inline std::basic_ostream<Elem, Traits>& dptr::detail::operator<<(std::basic_ost
 	return strm << iptr.get();
 }
 
+inline constexpr dptr::dependency_op_flags dptr::operator~(dependency_op op) noexcept
+{
+	return ~static_cast<dependency_op_flags>(op);
+}
+
+inline constexpr dptr::dependency_op_flags dptr::operator|(dependency_op lhs, dependency_op rhs) noexcept
+{
+	return static_cast<dependency_op_flags>(lhs) | static_cast<dependency_op_flags>(rhs);
+}
+
+constexpr dptr::dependency_op_flags dptr::operator|(dependency_op_flags lhs, dependency_op rhs) noexcept
+{
+	return lhs | static_cast<dependency_op_flags>(rhs);
+}
+
+constexpr dptr::dependency_op_flags dptr::operator|(dependency_op lhs, dependency_op_flags rhs) noexcept
+{
+	return static_cast<dependency_op_flags>(lhs) | rhs;
+}
+
+inline constexpr dptr::dependency_op_flags dptr::operator&(dependency_op lhs, dependency_op rhs) noexcept
+{
+	return static_cast<dependency_op_flags>(lhs) & static_cast<dependency_op_flags>(rhs);
+}
+
+constexpr dptr::dependency_op_flags dptr::operator&(dependency_op_flags lhs, dependency_op rhs) noexcept
+{
+	return lhs & static_cast<dependency_op_flags>(rhs);
+}
+
+constexpr dptr::dependency_op_flags dptr::operator&(dependency_op lhs, dependency_op_flags rhs) noexcept
+{
+	return static_cast<dependency_op_flags>(lhs) & rhs;
+}
+
+inline constexpr dptr::dependency_op_flags dptr::operator^(dependency_op lhs, dependency_op rhs) noexcept
+{
+	return static_cast<dependency_op_flags>(lhs) ^ static_cast<dependency_op_flags>(rhs);
+}
+
+constexpr dptr::dependency_op_flags dptr::operator^(dependency_op_flags lhs, dependency_op rhs) noexcept
+{
+	return lhs ^ static_cast<dependency_op_flags>(rhs);
+}
+
+constexpr dptr::dependency_op_flags dptr::operator^(dependency_op lhs, dependency_op_flags rhs) noexcept
+{
+	return static_cast<dependency_op_flags>(lhs) ^ rhs;
+}
+
+inline constexpr dptr::dependency_op_flags& dptr::operator|=(dependency_op_flags& lhs, dependency_op rhs) noexcept
+{
+	return lhs |= static_cast<dependency_op_flags>(rhs);
+}
+
+inline constexpr dptr::dependency_op_flags& dptr::operator&=(dependency_op_flags& lhs, dependency_op rhs) noexcept
+{
+	return lhs &= static_cast<dependency_op_flags>(rhs);
+}
+
+inline constexpr dptr::dependency_op_flags& dptr::operator^=(dependency_op_flags& lhs, dependency_op rhs) noexcept
+{
+	return lhs ^= static_cast<dependency_op_flags>(rhs);
+}
+
 // --- atomic version
-inline dptr::detail::guarded_dependency_impl<true>::guarded_dependency_impl() noexcept :
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::guarded_dependency_impl() noexcept :
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
 }
-inline dptr::detail::guarded_dependency_impl<true>::guarded_dependency_impl(const guarded_dependency_impl& other) noexcept :
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::guarded_dependency_impl(const guarded_dependency_impl& other) noexcept :
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
 }
-inline dptr::detail::guarded_dependency_impl<true>::guarded_dependency_impl(guarded_dependency_impl&& other) noexcept :
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::guarded_dependency_impl(guarded_dependency_impl&& other) noexcept :
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
-	// if there are still dependents, moving from the object gives undefined behaviour
-	DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::guarded_dependency_impl::guarded_dependency_impl(move ctor)]: There were still (now invalid!) pointers referencing the moved-from object.");
+	// if there are still dependees, moving from the object gives undefined behaviour
+	if constexpr(forbidden_ops & dependency_op::move_from)
+		DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::guarded_dependency_impl(move ctor)]: There were still (now invalid!) pointers referencing the moved-from object.");
 }
-inline dptr::detail::guarded_dependency_impl<true>& dptr::detail::guarded_dependency_impl<true>::operator=(const guarded_dependency_impl& other) noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>& dptr::detail::guarded_dependency_impl<true, forbidden_ops>::operator=(const guarded_dependency_impl& other) noexcept
 {
 	// object stays at the same address => do not modify counter
+	if constexpr(forbidden_ops & dependency_op::copy_assign)
+		DPTR_ASSERT(m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(copy)]: There were still (now possibly invalid!) pointers referencing the assigned object.");
 	return *this;
 }
-inline dptr::detail::guarded_dependency_impl<true>& dptr::detail::guarded_dependency_impl<true>::operator=(guarded_dependency_impl&& other) noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>& dptr::detail::guarded_dependency_impl<true, forbidden_ops>::operator=(guarded_dependency_impl&& other) noexcept
 {
 	// object stays at the same address => do not modify counter
-	// if there are still dependents, moving from the object gives undefined behaviour
-	DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::guarded_dependency_impl::operator=(move)]: There were still (now invalid!) pointers referencing the moved-from object.");
+	// if there are still dependees, moving from the object gives undefined behaviour
+	if constexpr(forbidden_ops & dependency_op::move_from)
+		DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(move)]: There were still (now invalid!) pointers referencing the moved-from object.");
+	if constexpr(forbidden_ops & dependency_op::move_assign)
+		DPTR_ASSERT(m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(move)]: There were still (now possibly invalid!) pointers referencing the assigned object.");
 	return *this;
 }
-inline dptr::detail::guarded_dependency_impl<true>::~guarded_dependency_impl()
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::~guarded_dependency_impl()
 {
-	DPTR_ASSERT(m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::guarded_dependency_impl::~guarded_dependency_impl]: There were still (now dangling!) pointers referencing this object.");
+	if constexpr(forbidden_ops & dependency_op::destroy)
+		DPTR_ASSERT(m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::~guarded_dependency_impl]: There were still (now dangling!) pointers referencing this object.");
 }
-inline void dptr::detail::guarded_dependency_impl<true>::inc() const noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline void dptr::detail::guarded_dependency_impl<true, forbidden_ops>::inc() const noexcept
 {
 	m_counter.fetch_add(1ull, std::memory_order::memory_order_relaxed);
 }
-inline void dptr::detail::guarded_dependency_impl<true>::dec() const noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline void dptr::detail::guarded_dependency_impl<true, forbidden_ops>::dec() const noexcept
 {
 	m_counter.fetch_sub(1ull, std::memory_order::memory_order_relaxed);
 }
 
 // --- non atomic version
-inline dptr::detail::guarded_dependency_impl<false>::guarded_dependency_impl() noexcept :
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::guarded_dependency_impl() noexcept :
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
 }
-inline dptr::detail::guarded_dependency_impl<false>::guarded_dependency_impl(const guarded_dependency_impl& other) noexcept :
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::guarded_dependency_impl(const guarded_dependency_impl& other) noexcept :
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
 }
-inline dptr::detail::guarded_dependency_impl<false>::guarded_dependency_impl(guarded_dependency_impl&& other) noexcept :
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::guarded_dependency_impl(guarded_dependency_impl&& other) noexcept :
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
-	// if there are still dependents, moving from the object gives undefined behaviour
-	DPTR_ASSERT(other.m_counter == 0ull, "[dptr::guarded_dependency_impl::guarded_dependency_impl(move ctor)]: There were still (now invalid!) pointers referencing the moved-from object.");
+	// if there are still dependees, moving from the object gives undefined behaviour
+	if constexpr(forbidden_ops & dependency_op::move_from)
+		DPTR_ASSERT(other.m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::guarded_dependency_impl(move ctor)]: There were still (now invalid!) pointers referencing the moved-from object.");
 }
-inline dptr::detail::guarded_dependency_impl<false>& dptr::detail::guarded_dependency_impl<false>::operator=(const guarded_dependency_impl& other) noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>& dptr::detail::guarded_dependency_impl<false, forbidden_ops>::operator=(const guarded_dependency_impl& other) noexcept
 {
 	// object stays at the same address => do not modify counter
+	if constexpr(forbidden_ops & dependency_op::copy_assign)
+		DPTR_ASSERT(m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(copy)]: There were still (now possibly invalid!) pointers referencing the assigned object.");
 	return *this;
 }
-inline dptr::detail::guarded_dependency_impl<false>& dptr::detail::guarded_dependency_impl<false>::operator=(guarded_dependency_impl&& other) noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>& dptr::detail::guarded_dependency_impl<false, forbidden_ops>::operator=(guarded_dependency_impl&& other) noexcept
 {
 	// object stays at the same address => do not modify counter
-	// if there are still dependents, moving from the object gives undefined behaviour
-	DPTR_ASSERT(other.m_counter == 0ull, "[dptr::guarded_dependency_impl::operator=(move)]: There were still (now invalid!) pointers referencing the moved-from object.");
+	// if there are still dependees, moving from the object gives undefined behaviour
+	if constexpr(forbidden_ops & dependency_op::move_from)
+		DPTR_ASSERT(other.m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(move)]: There were still (now invalid!) pointers referencing the moved-from object.");
+	if constexpr(forbidden_ops & dependency_op::move_assign)
+		DPTR_ASSERT(m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(move)]: There were still (now possibly invalid!) pointers referencing the assigned object.");
 	return *this;
 }
-inline dptr::detail::guarded_dependency_impl<false>::~guarded_dependency_impl()
+template <dptr::dependency_op_flags forbidden_ops>
+inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::~guarded_dependency_impl()
 {
-	DPTR_ASSERT(m_counter == 0ull, "[dptr::guarded_dependency_impl::~guarded_dependency_impl]: There were still (now dangling!) pointers referencing this object.");
+	if constexpr(forbidden_ops & dependency_op::destroy)
+		DPTR_ASSERT(m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::~guarded_dependency_impl]: There were still (now dangling!) pointers referencing this object.");
 }
-inline void dptr::detail::guarded_dependency_impl<false>::inc() const noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline void dptr::detail::guarded_dependency_impl<false, forbidden_ops>::inc() const noexcept
 {
 	++m_counter;
 }
-inline void dptr::detail::guarded_dependency_impl<false>::dec() const noexcept
+template <dptr::dependency_op_flags forbidden_ops>
+inline void dptr::detail::guarded_dependency_impl<false, forbidden_ops>::dec() const noexcept
 {
 	--m_counter;
 }
 
 // --- inc/dec functions
-template<bool atomic>
-void dptr::detail::intrusive_ptr_add_ref(const guarded_dependency_impl<atomic>* dep) noexcept
+template<bool atomic, dptr::dependency_op_flags forbidden_ops>
+void dptr::detail::intrusive_ptr_add_ref(const guarded_dependency_impl<atomic, forbidden_ops>* dep) noexcept
 {
 	dep->inc();
 }
-template<bool atomic>
-void dptr::detail::intrusive_ptr_release(const guarded_dependency_impl<atomic>* dep) noexcept
+template<bool atomic, dptr::dependency_op_flags forbidden_ops>
+void dptr::detail::intrusive_ptr_release(const guarded_dependency_impl<atomic, forbidden_ops>* dep) noexcept
 {
 	dep->dec();
 }
 #pragma endregion
-
 #endif
