@@ -484,6 +484,8 @@ inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::guarded_depen
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
+	if constexpr(forbidden_ops & dependency_op::copy_from)
+		DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::guarded_dependency_impl(copy ctor)]: There were still (now invalid!) pointers referencing the copied-from object.");
 }
 template <dptr::dependency_op_flags forbidden_ops>
 inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::guarded_dependency_impl(guarded_dependency_impl&& other) noexcept :
@@ -498,8 +500,10 @@ template <dptr::dependency_op_flags forbidden_ops>
 inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>& dptr::detail::guarded_dependency_impl<true, forbidden_ops>::operator=(const guarded_dependency_impl& other) noexcept
 {
 	// object stays at the same address => do not modify counter
+	if constexpr(forbidden_ops & dependency_op::copy_from)
+		DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::opeartor=(copy)]: There were still (now invalid!) pointers referencing the copied-from object.");
 	if constexpr(forbidden_ops & dependency_op::copy_assign)
-		DPTR_ASSERT(m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(copy)]: There were still (now possibly invalid!) pointers referencing the assigned object.");
+		DPTR_ASSERT(m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(copy)]: There were still (now possibly invalid!) pointers referencing the assigned object.");	
 	return *this;
 }
 template <dptr::dependency_op_flags forbidden_ops>
@@ -542,6 +546,8 @@ inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::guarded_depe
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
+	if constexpr(forbidden_ops & dependency_op::copy_from)
+		DPTR_ASSERT(m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::guarded_dependency_impl(copy ctor)]: There were still (now invalid!) pointers referencing the copied-from object.");
 }
 template <dptr::dependency_op_flags forbidden_ops>
 inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::guarded_dependency_impl(guarded_dependency_impl&& other) noexcept :
@@ -556,6 +562,8 @@ template <dptr::dependency_op_flags forbidden_ops>
 inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>& dptr::detail::guarded_dependency_impl<false, forbidden_ops>::operator=(const guarded_dependency_impl& other) noexcept
 {
 	// object stays at the same address => do not modify counter
+	if constexpr(forbidden_ops & dependency_op::copy_from)
+		DPTR_ASSERT(other.m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(copy)]: There were still (now invalid!) pointers referencing the copied-from object.");
 	if constexpr(forbidden_ops & dependency_op::copy_assign)
 		DPTR_ASSERT(m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(copy)]: There were still (now possibly invalid!) pointers referencing the assigned object.");
 	return *this;
