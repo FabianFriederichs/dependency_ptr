@@ -1,5 +1,5 @@
 # dependency_ptr
-*dependency_ptr.hpp* is a small utility header file which helps validating dependency pointers in hirarchies of interdependent objects.
+*dependency_ptr.hpp* is a small utility header file which helps validating dependency pointers in hierarchies of interdependent objects.
 
 The type `dependency_ptr<T>` is used as a drop-in replacement for non-owning raw pointers to dependencies. In debug builds it evaluates to a smart-pointer
 based on boost's *intrusive_ptr*, which is used for reference counting `dependency_ptr<T>` instances referring to an instance of `T`.
