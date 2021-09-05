@@ -311,13 +311,13 @@ inline void dptr::detail::intrusive_ptr<T>::reset(T* ptr, bool add_ref)
 template<typename T>
 inline T& dptr::detail::intrusive_ptr<T>::operator*() const noexcept
 {
-	GTS_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator*]: nullptr access.");
+	DPTR_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator*]: nullptr access.");
 	return *m_ptr;
 }
 template<typename T>
 inline T* dptr::detail::intrusive_ptr<T>::operator->() const noexcept
 {
-	GTS_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator->]: nullptr access.");
+	DPTR_ASSERT(m_ptr, "[dptr::detail::intrusive_ptr::operator->]: nullptr access.");
 	return m_ptr;
 }
 template<typename T>
