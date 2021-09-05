@@ -492,7 +492,7 @@ inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>::guarded_depen
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
-	// if there are still dependees, moving from the object gives undefined behaviour
+	// if there are still references, moving from the object causes undefined behaviour
 	if constexpr(forbidden_ops & dependency_op::move_from)
 		DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::guarded_dependency_impl(move ctor)]: There were still (now invalid!) pointers referencing the moved-from object.");
 }
@@ -510,7 +510,7 @@ template <dptr::dependency_op_flags forbidden_ops>
 inline dptr::detail::guarded_dependency_impl<true, forbidden_ops>& dptr::detail::guarded_dependency_impl<true, forbidden_ops>::operator=(guarded_dependency_impl&& other) noexcept
 {
 	// object stays at the same address => do not modify counter
-	// if there are still dependees, moving from the object gives undefined behaviour
+	// if there are still references, moving from the object causes undefined behaviour
 	if constexpr(forbidden_ops & dependency_op::move_from)
 		DPTR_ASSERT(other.m_counter.load(std::memory_order_relaxed) == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(move)]: There were still (now invalid!) pointers referencing the moved-from object.");
 	if constexpr(forbidden_ops & dependency_op::move_assign)
@@ -554,7 +554,7 @@ inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>::guarded_depe
 	m_counter(0ull)
 {
 	// new object at new address, init counter to 0
-	// if there are still dependees, moving from the object gives undefined behaviour
+	// if there are still references, moving from the object causes undefined behaviour
 	if constexpr(forbidden_ops & dependency_op::move_from)
 		DPTR_ASSERT(other.m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::guarded_dependency_impl(move ctor)]: There were still (now invalid!) pointers referencing the moved-from object.");
 }
@@ -572,7 +572,7 @@ template <dptr::dependency_op_flags forbidden_ops>
 inline dptr::detail::guarded_dependency_impl<false, forbidden_ops>& dptr::detail::guarded_dependency_impl<false, forbidden_ops>::operator=(guarded_dependency_impl&& other) noexcept
 {
 	// object stays at the same address => do not modify counter
-	// if there are still dependees, moving from the object gives undefined behaviour
+	// if there are still references, moving from the object causes undefined behaviour
 	if constexpr(forbidden_ops & dependency_op::move_from)
 		DPTR_ASSERT(other.m_counter == 0ull, "[dptr::detail::guarded_dependency_impl::operator=(move)]: There were still (now invalid!) pointers referencing the moved-from object.");
 	if constexpr(forbidden_ops & dependency_op::move_assign)
