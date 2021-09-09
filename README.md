@@ -1,8 +1,8 @@
 # dependency_ptr
-*dependency_ptr.hpp* is a small utility header file which helps validating dependency pointers in hirarchies of interdependent objects.
+*dependency_ptr.hpp* is a small utility header file which helps validating dependency pointers in hierarchies of interdependent objects.
 
 The type `dependency_ptr<T>` is used as a drop-in replacement for non-owning raw pointers to dependencies. In debug builds it evaluates to a smart-pointer
-based on boost's *intrusive_ptr*, which is used for reference counting `dependency_ptr<T>` instances referring to a instance of `T`.
+based on boost's *intrusive_ptr*, which is used for reference counting `dependency_ptr<T>` instances referring to an instance of `T`.
 In debug builds `dependency_ptr<T>` is implicitly convertible to `T*`.
 
 The other type, `guarded_dependency<bool, dependency_op_flags>` is used as a base class for dependency types. In debug builds it adds
@@ -11,7 +11,7 @@ passed via the second template parameter, assertions are triggered if any operat
 is > 0.
 
 In release builds, where `NDEBUG` is defined, `dependency_ptr<T>` evaluates to a plain pointer `T*` and `guarded_dependency<bool, dependency_op_flags>`
-to a empty class, respectively. Therefore, there are no additional runtime costs in release builds, provided that empty base optimization is applied.
+to an empty class, respectively. Hence, there are no additional runtime costs in release builds, provided that empty base optimization is applied.
 
 The following forbidden operations on instances with reference count > 0 (enum `dependency_op`) can be specified and combined via binary-or:
 | dependency_op:: | Operation                               |
