@@ -71,18 +71,14 @@ namespace dptr
 			intrusive_ptr(T* ptr, bool add_ref = true);
 
 			intrusive_ptr(const intrusive_ptr& other);
-			template <typename U>
-			intrusive_ptr(const intrusive_ptr<U>& other);
 			intrusive_ptr& operator=(const intrusive_ptr& other);
-			template <typename U>
-			intrusive_ptr& operator=(const intrusive_ptr<U> &other);
-
 			intrusive_ptr(intrusive_ptr&& other) noexcept;
-			template <typename U>
-			intrusive_ptr(intrusive_ptr<U>&& other) noexcept;
-			intrusive_ptr& operator=(intrusive_ptr&& other);
-			template <typename U>
-			intrusive_ptr& operator=(intrusive_ptr<U>&& other);
+			intrusive_ptr& operator=(intrusive_ptr&& other) noexcept;
+
+			template <typename U> intrusive_ptr(const intrusive_ptr<U>& other);			
+			template <typename U> intrusive_ptr& operator=(const intrusive_ptr<U>& other);			
+			template <typename U> intrusive_ptr(intrusive_ptr<U>&& other) noexcept;			
+			template <typename U> intrusive_ptr& operator=(intrusive_ptr<U>&& other) noexcept;
 
 			intrusive_ptr& operator=(T* ptr);
 
@@ -275,14 +271,14 @@ inline dptr::detail::intrusive_ptr<T>::intrusive_ptr(intrusive_ptr<U>&& other) n
 {
 }
 template<typename T>
-inline dptr::detail::intrusive_ptr<T>& dptr::detail::intrusive_ptr<T>::operator=(intrusive_ptr&& other)
+inline dptr::detail::intrusive_ptr<T>& dptr::detail::intrusive_ptr<T>::operator=(intrusive_ptr&& other) noexcept
 {
 	intrusive_ptr(std::move(other)).swap(*this);
 	return *this;
 }
 template <typename T>
 template <typename U>
-inline dptr::detail::intrusive_ptr<T>& dptr::detail::intrusive_ptr<T>::operator=(intrusive_ptr<U>&& other)
+inline dptr::detail::intrusive_ptr<T>& dptr::detail::intrusive_ptr<T>::operator=(intrusive_ptr<U>&& other) noexcept
 {
 	intrusive_ptr(std::move(other)).swap(*this);
 	return *this;
